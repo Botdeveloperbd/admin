@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  AppBar, Toolbar, Typography, IconButton, Drawer, List, ListItem, ListItemIcon, ListItemText, CssBaseline, Box, Button, Card, CardContent, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Pagination, Tooltip, Divider, Dialog, DialogTitle, DialogContent, DialogActions, TextField, CircularProgress, Avatar, Container, Chip, Select, MenuItem, ThemeProvider, createTheme
+  AppBar, Toolbar, Typography, IconButton, Drawer, List, ListItem, ListItemIcon, ListItemText, CssBaseline, Box, Button, Card, CardContent, Grid, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Pagination, Tooltip, Divider, Dialog, DialogTitle, DialogContent, DialogActions, TextField, CircularProgress, Avatar, Container, Chip, Select, MenuItem, ThemeProvider, createTheme, Snackbar, Alert, Fab, SpeedDial, SpeedDialAction, SpeedDialIcon
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import GroupIcon from '@mui/icons-material/Group';
@@ -56,6 +56,10 @@ function App() {
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [joinDateFilter, setJoinDateFilter] = useState(null);
   const [joinDatePickerOpen, setJoinDatePickerOpen] = useState(false);
+  // Notifications
+  const [notifications, setNotifications] = useState([]);
+  const [showNotification, setShowNotification] = useState(false);
+  const [currentNotification, setCurrentNotification] = useState(null);
   // Tracking Stats
   const [trackingStats, setTrackingStats] = useState({});
   const [trackingStatsLoading, setTrackingStatsLoading] = useState(false);
@@ -98,21 +102,46 @@ function App() {
   // API Health Check Function
   const checkApiHealth = async () => {
     try {
-    const response = await fetch(apiConfig.getDashboardStats(), { 
-        credentials: 'include',
-        method: 'GET'
-      });
+      const response = await fetch(apiConfig.healthCheck(), { credentials: 'include' });
       if (!response.ok) {
-        setApiError(`API Error: ${response.status} ${response.statusText}`);
-        return false;
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-      setApiError('');
-      return true;
+      const data = await response.json();
+      console.log('API Health Check:', data);
     } catch (error) {
-      console.error('API Health Check Failed:', error);
-      setApiError('API is not accessible. Please check if the backend server is running.');
-      return false;
+      console.error('API Health Check failed:', error);
+      setApiError('API connection failed. Please check your connection.');
     }
+  };
+
+  // Notification Functions
+  const showMessageNotification = (user, message) => {
+    const notification = {
+      id: Date.now(),
+      user: user,
+      message: message,
+      timestamp: new Date(),
+      type: 'message'
+    };
+    
+    setNotifications(prev => [...prev, notification]);
+    setCurrentNotification(notification);
+    setShowNotification(true);
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      setShowNotification(false);
+    }, 5000);
+  };
+
+  const handleNotificationClose = () => {
+    setShowNotification(false);
+  };
+
+  const handleNotificationClick = (notification) => {
+    // Open chat for this user
+    handleOpenChat(notification.user);
+    setShowNotification(false);
   };
 
   useEffect(() => {
@@ -214,6 +243,9 @@ function App() {
       if (audio.current) audio.current.play();
       
       console.log('New message received for user:', data.user_id, 'User:', user.full_name);
+      
+      // Show notification for new message
+      showMessageNotification(user, 'New message received');
       
       // Update open chats with new message
       setOpenChats(prev => {
@@ -974,7 +1006,21 @@ function App() {
                       <TableRow><TableCell colSpan={8} align="center">No users found.</TableCell></TableRow>
                     ) : (
                       (filteredUsers || []).map((user, idx) => (
-                        <TableRow key={user.user_id} hover sx={{ bgcolor: idx % 2 === 0 ? 'background.paper' : 'background.default', transition: 'background 0.2s' }}>
+                        <TableRow 
+                          key={user.user_id} 
+                          hover 
+                          sx={{ 
+                            bgcolor: idx % 2 === 0 ? 'background.paper' : 'background.default', 
+                            transition: 'all 0.2s ease',
+                            cursor: 'pointer',
+                            '&:hover': { 
+                              bgcolor: 'primary.50',
+                              transform: 'translateX(4px)',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                            }
+                          }}
+                          onClick={() => handleOpenChat(user)}
+                        >
                           <TableCell>{(page - 1) * pageSize + idx + 1}</TableCell>
                           <TableCell>{user.user_id}</TableCell>
                           <TableCell>
@@ -986,7 +1032,12 @@ function App() {
                                   {user.full_name ? user.full_name[0] : 'U'}
                                 </Avatar>
                               )}
-                              <span>{user.full_name || 'Unknown'}</span>
+                              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontWeight: 500 }}>{user.full_name || 'Unknown'}</span>
+                                <span style={{ fontSize: '0.8rem', color: 'text.secondary' }}>
+                                  {user.username ? `@${user.username}` : 'No username'}
+                                </span>
+                              </Box>
                               {user.label && <Chip label={user.label} size="small" color={user.label === 'VIP' ? 'secondary' : 'primary'} sx={{ ml: 1 }} />}
                               <Select
                                 size="small"
@@ -994,6 +1045,7 @@ function App() {
                                 onChange={e => handleLabelChange(user.user_id, e.target.value)}
                                 sx={{ ml: 1, minWidth: 90 }}
                                 displayEmpty
+                                onClick={(e) => e.stopPropagation()}
                               >
                                 {labelOptions.map(opt => (
                                   <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
@@ -1047,16 +1099,48 @@ function App() {
                             ) : '-'}
                           </TableCell>
                           <TableCell>
-                            <Tooltip title="Chat">
-                              <IconButton color="primary" onClick={() => handleOpenChat(user)}>
-                                <ChatIcon />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Send Message">
-                              <IconButton color="success" onClick={() => setDirectMsgUser(user)}>
-                                <SendIcon />
-                              </IconButton>
-                            </Tooltip>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Tooltip title="Chat">
+                                <IconButton 
+                                  color="primary" 
+                                  onClick={(e) => { e.stopPropagation(); handleOpenChat(user); }}
+                                  sx={{ 
+                                    '&:hover': { 
+                                      transform: 'scale(1.1)', 
+                                      bgcolor: 'primary.light',
+                                      transition: 'all 0.2s ease'
+                                    }
+                                  }}
+                                >
+                                  <ChatIcon />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Send Message">
+                                <IconButton 
+                                  color="success" 
+                                  onClick={(e) => { e.stopPropagation(); setDirectMsgUser(user); }}
+                                  sx={{ 
+                                    '&:hover': { 
+                                      transform: 'scale(1.1)', 
+                                      bgcolor: 'success.light',
+                                      transition: 'all 0.2s ease'
+                                    }
+                                  }}
+                                >
+                                  <SendIcon />
+                                </IconButton>
+                              </Tooltip>
+                              <Typography 
+                                variant="caption" 
+                                sx={{ 
+                                  color: 'text.secondary', 
+                                  fontStyle: 'italic',
+                                  ml: 1
+                                }}
+                              >
+                                Click row to chat
+                              </Typography>
+                            </Box>
                           </TableCell>
                         </TableRow>
                       ))
@@ -1159,6 +1243,95 @@ function App() {
               onSend={(text, files, cb) => handleSendChat(chat.user.user_id, files, cb)}
             />
           ))}
+
+          {/* Messenger-style Notifications */}
+          <Snackbar
+            open={showNotification}
+            autoHideDuration={5000}
+            onClose={handleNotificationClose}
+            anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+            sx={{ 
+              top: 80,
+              '& .MuiSnackbar-root': {
+                position: 'fixed'
+              }
+            }}
+          >
+            {currentNotification && (
+              <Alert
+                onClose={handleNotificationClose}
+                severity="info"
+                sx={{ 
+                  width: '100%',
+                  cursor: 'pointer',
+                  '&:hover': {
+                    bgcolor: 'info.light'
+                  }
+                }}
+                onClick={() => handleNotificationClick(currentNotification)}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Avatar 
+                    src={currentNotification.user.photo_url} 
+                    sx={{ width: 24, height: 24 }}
+                  >
+                    {currentNotification.user.full_name ? currentNotification.user.full_name[0] : 'U'}
+                  </Avatar>
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                      {currentNotification.user.full_name || currentNotification.user.username || 'User'}
+                    </Typography>
+                    <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                      {currentNotification.message}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Alert>
+            )}
+          </Snackbar>
+
+          {/* Floating Chat Button - Facebook Messenger Style */}
+          <SpeedDial
+            ariaLabel="Quick Chat"
+            sx={{
+              position: 'fixed',
+              bottom: 20,
+              left: 20,
+              zIndex: 1000,
+              '& .MuiFab-primary': {
+                bgcolor: '#007bff',
+                '&:hover': {
+                  bgcolor: '#0056b3',
+                  transform: 'scale(1.1)'
+                },
+                transition: 'all 0.2s ease'
+              }
+            }}
+            icon={<ChatIcon />}
+            open={false}
+          >
+            {users.slice(0, 5).map((user) => (
+              <SpeedDialAction
+                key={user.user_id}
+                icon={
+                  <Avatar 
+                    src={user.photo_url} 
+                    sx={{ width: 32, height: 32 }}
+                  >
+                    {user.full_name ? user.full_name[0] : 'U'}
+                  </Avatar>
+                }
+                tooltipTitle={`Chat with ${user.full_name || user.username || 'User'}`}
+                onClick={() => handleOpenChat(user)}
+                sx={{
+                  '&:hover': {
+                    transform: 'scale(1.1)'
+                  },
+                  transition: 'all 0.2s ease'
+                }}
+              />
+            ))}
+          </SpeedDial>
         </Container>
         {/* Footer */}
         <Box mt="auto" textAlign="center" color="#888" fontSize={14} py={2} sx={{ bgcolor: 'background.paper', borderTop: '1px solid #e0e5ee' }}>
