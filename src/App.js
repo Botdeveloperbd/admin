@@ -60,6 +60,9 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [showNotification, setShowNotification] = useState(false);
   const [currentNotification, setCurrentNotification] = useState(null);
+  // Auto-update status
+  const [isAutoUpdating, setIsAutoUpdating] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState(new Date());
   // Tracking Stats
   const [trackingStats, setTrackingStats] = useState({});
   const [trackingStatsLoading, setTrackingStatsLoading] = useState(false);
@@ -234,6 +237,112 @@ function App() {
       console.error('Socket.IO connection error:', error);
     });
     
+    // Real-time user data updates
+    socket.on('user_data_updated', (data) => {
+      console.log('User data updated:', data);
+      
+      // Update user data in real-time
+      setUsers(prev => prev.map(user => {
+        if (user.user_id === data.user_id) {
+          return {
+            ...user,
+            ...data.updates,
+            // Preserve existing data that wasn't updated
+            full_name: data.updates.full_name || user.full_name,
+            username: data.updates.username || user.username,
+            photo_url: data.updates.photo_url || user.photo_url,
+            is_online: data.updates.is_online !== undefined ? data.updates.is_online : user.is_online,
+            label: data.updates.label !== undefined ? data.updates.label : user.label,
+            referral_count: data.updates.referral_count !== undefined ? data.updates.referral_count : user.referral_count,
+            invite_link: data.updates.invite_link || user.invite_link,
+            referred_by: data.updates.referred_by || user.referred_by
+          };
+        }
+        return user;
+      }));
+    });
+
+    // Real-time stats updates
+    socket.on('stats_updated', (data) => {
+      console.log('Stats updated:', data);
+      setStats(prev => ({ ...prev, ...data }));
+    });
+
+    // Real-time tracking stats updates
+    socket.on('tracking_stats_updated', (data) => {
+      console.log('Tracking stats updated:', data);
+      setTrackingStats(prev => ({ ...prev, ...data }));
+    });
+
+    // Real-time invite link updates
+    socket.on('invite_link_updated', (data) => {
+      console.log('Invite link updated:', data);
+      if (data.user_id) {
+        // Update specific user's invite link
+        setUsers(prev => prev.map(user => {
+          if (user.user_id === data.user_id) {
+            return { ...user, invite_link: data.invite_link };
+          }
+          return user;
+        }));
+      } else {
+        // Update global invite link
+        setInviteLink(data.invite_link);
+      }
+    });
+
+    // Real-time referral updates
+    socket.on('referral_updated', (data) => {
+      console.log('Referral updated:', data);
+      setUsers(prev => prev.map(user => {
+        if (user.user_id === data.user_id) {
+          return { ...user, referral_count: data.referral_count };
+        }
+        if (user.user_id === data.referred_by) {
+          return { ...user, referral_count: (user.referral_count || 0) + 1 };
+        }
+        return user;
+      }));
+    });
+
+    // Real-time user label updates
+    socket.on('user_label_updated', (data) => {
+      console.log('User label updated:', data);
+      setUsers(prev => prev.map(user => {
+        if (user.user_id === data.user_id) {
+          return { ...user, label: data.label };
+        }
+        return user;
+      }));
+    });
+
+    // Real-time user online status updates
+    socket.on('user_status_updated', (data) => {
+      console.log('User status updated:', data);
+      setUsers(prev => prev.map(user => {
+        if (user.user_id === data.user_id) {
+          return { ...user, is_online: data.is_online };
+        }
+        return user;
+      }));
+    });
+
+    // Real-time user profile updates
+    socket.on('user_profile_updated', (data) => {
+      console.log('User profile updated:', data);
+      setUsers(prev => prev.map(user => {
+        if (user.user_id === data.user_id) {
+          return {
+            ...user,
+            full_name: data.full_name || user.full_name,
+            username: data.username || user.username,
+            photo_url: data.photo_url || user.photo_url
+          };
+        }
+        return user;
+      }));
+    });
+
     socket.on('new_message', (data) => {
       // Find user
       const user = users.find(u => u.user_id === data.user_id);
@@ -447,6 +556,78 @@ function App() {
 
     return () => clearInterval(interval);
   }, []);
+
+  // Automatic data refresh every 30 seconds
+  useEffect(() => {
+    const dataRefreshInterval = setInterval(() => {
+      // Refresh user data
+      fetch(apiConfig.getDashboardUsers(page, pageSize), { credentials: 'include' })
+        .then(res => {
+          if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+          }
+          return res.json();
+        })
+        .then(data => {
+          setUsers(Array.isArray(data.users) ? data.users : []);
+          setTotal(data.total || 0);
+        })
+        .catch(err => {
+          console.error('Error refreshing user data:', err);
+        });
+
+      // Refresh stats
+      fetch(apiConfig.getDashboardStats(), { credentials: 'include' })
+        .then(res => {
+          if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+          }
+          return res.json();
+        })
+        .then(data => {
+          setStats(data);
+        })
+        .catch(err => {
+          console.error('Error refreshing stats:', err);
+        });
+
+      // Refresh tracking stats
+      fetch(apiConfig.getTrackingStats(), { credentials: 'include' })
+        .then(res => {
+          if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+          }
+          return res.json();
+        })
+        .then(data => {
+          setTrackingStats(data);
+        })
+        .catch(err => {
+          console.error('Error refreshing tracking stats:', err);
+        });
+
+      // Refresh invite link if it exists
+      if (inviteLink) {
+        fetch(apiConfig.getChannelInviteLink())
+          .then(res => {
+            if (!res.ok) {
+              throw new Error(`HTTP error! status: ${res.status}`);
+            }
+            return res.json();
+          })
+          .then(data => {
+            if (data.invite_link && data.invite_link !== inviteLink) {
+              setInviteLink(data.invite_link);
+            }
+          })
+          .catch(err => {
+            console.error('Error refreshing invite link:', err);
+          });
+      }
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(dataRefreshInterval);
+  }, [page, pageSize, inviteLink]);
 
   // Function to open chat manually (from sidebar/table)
   const handleOpenChat = (user) => {
