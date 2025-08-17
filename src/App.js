@@ -63,6 +63,13 @@ function App() {
   // Auto-update status
   const [isAutoUpdating, setIsAutoUpdating] = useState(false);
   const [lastUpdateTime, setLastUpdateTime] = useState(new Date());
+  // API endpoint availability
+  const [availableEndpoints, setAvailableEndpoints] = useState({
+    trackingStats: true,
+    channelInviteLink: true,
+    dashboardStats: true,
+    dashboardUsers: true
+  });
   // Tracking Stats
   const [trackingStats, setTrackingStats] = useState({});
   const [trackingStatsLoading, setTrackingStatsLoading] = useState(false);
@@ -105,16 +112,60 @@ function App() {
   // API Health Check Function
   const checkApiHealth = async () => {
     try {
-      const response = await fetch(apiConfig.healthCheck(), { credentials: 'include' });
+      const response = await fetch(apiConfig.getDashboardStats(), { credentials: 'include' });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
       console.log('API Health Check:', data);
+      return true;
     } catch (error) {
       console.error('API Health Check failed:', error);
       setApiError('API connection failed. Please check your connection.');
+      return false;
     }
+  };
+
+  // Safe API fetch function with error handling
+  const safeApiFetch = async (endpoint, options = {}) => {
+    try {
+      const response = await fetch(endpoint, { credentials: 'include', ...options });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error(`API fetch failed for ${endpoint}:`, error);
+      return null;
+    }
+  };
+
+  // Check which API endpoints are available
+  const checkEndpointAvailability = async () => {
+    const endpoints = {
+      trackingStats: apiConfig.getTrackingStats(),
+      channelInviteLink: apiConfig.getChannelInviteLink(),
+      dashboardStats: apiConfig.getDashboardStats(),
+      dashboardUsers: apiConfig.getDashboardUsers(1, 1)
+    };
+
+    const availability = {};
+    
+    for (const [key, endpoint] of Object.entries(endpoints)) {
+      try {
+        const response = await fetch(endpoint, { 
+          method: 'HEAD', 
+          credentials: 'include' 
+        });
+        availability[key] = response.ok;
+      } catch (error) {
+        availability[key] = false;
+        console.log(`Endpoint ${key} is not available:`, error.message);
+      }
+    }
+
+    setAvailableEndpoints(availability);
+    console.log('Available endpoints:', availability);
   };
 
   // Notification Functions
@@ -137,13 +188,34 @@ function App() {
     }, 5000);
   };
 
+  const showDataUpdateNotification = (type, details) => {
+    const notification = {
+      id: Date.now(),
+      type: 'data_update',
+      message: `${type} updated automatically`,
+      details: details,
+      timestamp: new Date()
+    };
+    
+    setNotifications(prev => [...prev, notification]);
+    setCurrentNotification(notification);
+    setShowNotification(true);
+    
+    // Auto-hide after 3 seconds
+    setTimeout(() => {
+      setShowNotification(false);
+    }, 3000);
+  };
+
   const handleNotificationClose = () => {
     setShowNotification(false);
   };
 
   const handleNotificationClick = (notification) => {
-    // Open chat for this user
-    handleOpenChat(notification.user);
+    if (notification.type === 'message' && notification.user) {
+      // Open chat for this user
+      handleOpenChat(notification.user);
+    }
     setShowNotification(false);
   };
 
@@ -155,66 +227,82 @@ function App() {
         return;
       }
 
-      // Fetch dashboard users
-      setUsersLoading(true);
-      fetch(apiConfig.getDashboardUsers(page, pageSize), { credentials: 'include' })
-        .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-          }
-          return res.json();
-        })
-        .then(data => {
-          setUsers(Array.isArray(data.users) ? data.users : []);
-          setTotal(data.total || 0);
-          setUsersLoading(false);
-        })
-        .catch(err => {
-          console.error('Error fetching dashboard users:', err);
-          setUsers([]);
-          setTotal(0);
-          setUsersLoading(false);
-        });
+      // Check which endpoints are available
+      checkEndpointAvailability().then(() => {
+        // Fetch dashboard users
+        setUsersLoading(true);
+        safeApiFetch(apiConfig.getDashboardUsers(page, pageSize))
+          .then(data => {
+            if (data) {
+              setUsers(Array.isArray(data.users) ? data.users : []);
+              setTotal(data.total || 0);
+            }
+            setUsersLoading(false);
+          })
+          .catch(err => {
+            console.error('Error fetching dashboard users:', err);
+            setUsers([]);
+            setTotal(0);
+            setUsersLoading(false);
+          });
 
-      // Fetch dashboard stats
-      setStatsLoading(true);
-      fetch(apiConfig.getDashboardStats(), { credentials: 'include' })
-        .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-          }
-          return res.json();
-        })
-        .then(data => {
-          setStats(data);
-          setStatsLoading(false);
-        })
-        .catch(err => {
-          console.error('Error fetching dashboard stats:', err);
-          setStats({});
-          setStatsLoading(false);
-        });
-      
-      // Fetch tracking stats
-      setTrackingStatsLoading(true);
-      fetch(apiConfig.getTrackingStats(), { credentials: 'include' })
-        .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-          }
-          return res.json();
-        })
-        .then(data => {
-          setTrackingStats(data);
+        // Fetch dashboard stats
+        setStatsLoading(true);
+        safeApiFetch(apiConfig.getDashboardStats())
+          .then(data => {
+            if (data) {
+              setStats(data);
+            }
+            setStatsLoading(false);
+          })
+          .catch(err => {
+            console.error('Error fetching dashboard stats:', err);
+            setStats({});
+            setStatsLoading(false);
+          });
+        
+        // Fetch tracking stats only if endpoint is available
+        if (availableEndpoints.trackingStats) {
+          setTrackingStatsLoading(true);
+          safeApiFetch(apiConfig.getTrackingStats())
+            .then(data => {
+              if (data) {
+                setTrackingStats(data);
+              } else {
+                // Set default tracking stats if endpoint doesn't exist
+                setTrackingStats({
+                  total_referrals: 0,
+                  users_with_tracking: 0,
+                  conversion_rate: 0,
+                  top_referrers: []
+                });
+              }
+              setTrackingStatsLoading(false);
+            })
+            .catch(err => {
+              console.error('Error fetching tracking stats:', err);
+              // Set default tracking stats on error
+              setTrackingStats({
+                total_referrals: 0,
+                users_with_tracking: 0,
+                conversion_rate: 0,
+                top_referrers: []
+              });
+              setTrackingStatsLoading(false);
+            });
+        } else {
+          // Set default tracking stats if endpoint is not available
+          setTrackingStats({
+            total_referrals: 0,
+            users_with_tracking: 0,
+            conversion_rate: 0,
+            top_referrers: []
+          });
           setTrackingStatsLoading(false);
-        })
-        .catch(err => {
-          console.error('Error fetching tracking stats:', err);
-          setTrackingStats({});
-          setTrackingStatsLoading(false);
-        });
+        }
+      });
     });
-  }, [page, pageSize]);
+  }, [page, pageSize, availableEndpoints.trackingStats]);
 
   // Socket.IO for real-time
   useEffect(() => {
@@ -560,74 +648,69 @@ function App() {
   // Automatic data refresh every 30 seconds
   useEffect(() => {
     const dataRefreshInterval = setInterval(() => {
+      // Show updating status
+      setIsAutoUpdating(true);
+      
       // Refresh user data
-      fetch(apiConfig.getDashboardUsers(page, pageSize), { credentials: 'include' })
-        .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-          }
-          return res.json();
-        })
+      safeApiFetch(apiConfig.getDashboardUsers(page, pageSize))
         .then(data => {
-          setUsers(Array.isArray(data.users) ? data.users : []);
-          setTotal(data.total || 0);
+          if (data) {
+            setUsers(Array.isArray(data.users) ? data.users : []);
+            setTotal(data.total || 0);
+            showDataUpdateNotification('User data', `${data.users?.length || 0} users loaded`);
+          }
         })
         .catch(err => {
           console.error('Error refreshing user data:', err);
         });
 
       // Refresh stats
-      fetch(apiConfig.getDashboardStats(), { credentials: 'include' })
-        .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-          }
-          return res.json();
-        })
+      safeApiFetch(apiConfig.getDashboardStats())
         .then(data => {
-          setStats(data);
+          if (data) {
+            setStats(data);
+            showDataUpdateNotification('Dashboard stats', 'Statistics refreshed');
+          }
         })
         .catch(err => {
           console.error('Error refreshing stats:', err);
         });
 
-      // Refresh tracking stats
-      fetch(apiConfig.getTrackingStats(), { credentials: 'include' })
-        .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-          }
-          return res.json();
-        })
-        .then(data => {
-          setTrackingStats(data);
-        })
-        .catch(err => {
-          console.error('Error refreshing tracking stats:', err);
-        });
-
-      // Refresh invite link if it exists
-      if (inviteLink) {
-        fetch(apiConfig.getChannelInviteLink())
-          .then(res => {
-            if (!res.ok) {
-              throw new Error(`HTTP error! status: ${res.status}`);
-            }
-            return res.json();
-          })
+      // Refresh tracking stats only if endpoint is available
+      if (availableEndpoints.trackingStats) {
+        safeApiFetch(apiConfig.getTrackingStats())
           .then(data => {
-            if (data.invite_link && data.invite_link !== inviteLink) {
+            if (data) {
+              setTrackingStats(data);
+              showDataUpdateNotification('Tracking stats', 'Referral data updated');
+            }
+          })
+          .catch(err => {
+            console.error('Error refreshing tracking stats:', err);
+          });
+      }
+
+      // Refresh invite link only if endpoint is available
+      if (availableEndpoints.channelInviteLink && inviteLink) {
+        safeApiFetch(apiConfig.getChannelInviteLink())
+          .then(data => {
+            if (data && data.invite_link && data.invite_link !== inviteLink) {
               setInviteLink(data.invite_link);
+              showDataUpdateNotification('Invite link', 'Channel link refreshed');
             }
           })
           .catch(err => {
             console.error('Error refreshing invite link:', err);
           });
       }
+
+      // Update timestamp and hide updating status
+      setLastUpdateTime(new Date());
+      setTimeout(() => setIsAutoUpdating(false), 2000); // Hide after 2 seconds
     }, 30000); // 30 seconds
 
     return () => clearInterval(dataRefreshInterval);
-  }, [page, pageSize, inviteLink]);
+  }, [page, pageSize, inviteLink, availableEndpoints.trackingStats, availableEndpoints.channelInviteLink]);
 
   // Function to open chat manually (from sidebar/table)
   const handleOpenChat = (user) => {
@@ -899,6 +982,135 @@ function App() {
             </Typography>
           </Box>
         )}
+
+        {/* Auto-Update Status Indicator */}
+        <Box sx={{ 
+          position: 'fixed', 
+          top: 70, 
+          right: 20, 
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1
+        }}>
+          {isAutoUpdating && (
+            <Box sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              bgcolor: 'success.main',
+              color: 'white',
+              px: 2,
+              py: 1,
+              borderRadius: 2,
+              boxShadow: 2,
+              animation: 'pulse 2s infinite',
+              '@keyframes pulse': {
+                '0%': { opacity: 1 },
+                '50%': { opacity: 0.7 },
+                '100%': { opacity: 1 }
+              }
+            }}>
+              <Box sx={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                bgcolor: 'white',
+                animation: 'spin 1s linear infinite',
+                '@keyframes spin': {
+                  '0%': { transform: 'rotate(0deg)' },
+                  '100%': { transform: 'rotate(360deg)' }
+                }
+              }} />
+              <Typography variant="caption" sx={{ fontWeight: 500 }}>
+                Auto-updating...
+              </Typography>
+            </Box>
+          )}
+          <Box sx={{
+            bgcolor: 'rgba(0,0,0,0.1)',
+            color: 'text.secondary',
+            px: 2,
+            py: 1,
+            borderRadius: 2,
+            fontSize: '0.75rem'
+          }}>
+            Last update: {lastUpdateTime.toLocaleTimeString()}
+          </Box>
+          <Box sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
+            bgcolor: 'rgba(0,0,0,0.05)',
+            px: 1,
+            py: 0.5,
+            borderRadius: 1,
+            fontSize: '0.7rem'
+          }}>
+            {Object.entries(availableEndpoints).map(([key, available]) => (
+              <Tooltip key={key} title={`${key} endpoint ${available ? 'available' : 'unavailable'}`}>
+                <Box sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  bgcolor: available ? 'success.main' : 'error.main',
+                  opacity: available ? 1 : 0.5
+                }} />
+              </Tooltip>
+            ))}
+          </Box>
+          <Tooltip title="Refresh Now">
+            <IconButton
+              size="small"
+              onClick={() => {
+                setIsAutoUpdating(true);
+                // Trigger immediate refresh using safe fetch
+                safeApiFetch(apiConfig.getDashboardUsers(page, pageSize))
+                  .then(data => {
+                    if (data) {
+                      setUsers(Array.isArray(data.users) ? data.users : []);
+                      setTotal(data.total || 0);
+                    }
+                  });
+                safeApiFetch(apiConfig.getDashboardStats())
+                  .then(data => {
+                    if (data) {
+                      setStats(data);
+                    }
+                  });
+                // Only fetch tracking stats if endpoint is available
+                if (availableEndpoints.trackingStats) {
+                  safeApiFetch(apiConfig.getTrackingStats())
+                    .then(data => {
+                      if (data) {
+                        setTrackingStats(data);
+                      }
+                    });
+                }
+                setLastUpdateTime(new Date());
+                setTimeout(() => setIsAutoUpdating(false), 2000);
+              }}
+              sx={{
+                bgcolor: 'primary.main',
+                color: 'white',
+                '&:hover': {
+                  bgcolor: 'primary.dark',
+                  transform: 'scale(1.1)'
+                },
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <Box sx={{
+                width: 16,
+                height: 16,
+                border: '2px solid white',
+                borderTop: '2px solid transparent',
+                borderRadius: '50%',
+                animation: isAutoUpdating ? 'spin 1s linear infinite' : 'none'
+              }} />
+            </IconButton>
+          </Tooltip>
+        </Box>
         {/* Sidebar Drawer */}
         {isDesktop ? (
           <Drawer
@@ -1258,6 +1470,20 @@ function App() {
                                   <Chip label="Referred" size="small" color="info" variant="outlined" />
                                 </Tooltip>
                               )}
+                              {user.referral_count > 0 && (
+                                <Box sx={{
+                                  width: 6,
+                                  height: 6,
+                                  borderRadius: '50%',
+                                  bgcolor: 'success.main',
+                                  animation: 'pulse 2s infinite',
+                                  '@keyframes pulse': {
+                                    '0%': { opacity: 1 },
+                                    '50%': { opacity: 0.5 },
+                                    '100%': { opacity: 1 }
+                                  }
+                                }} />
+                              )}
                             </Box>
                           </TableCell>
                           <TableCell>
@@ -1276,6 +1502,18 @@ function App() {
                                     <Chip label="Tracked" size="small" color="warning" variant="outlined" />
                                   </Tooltip>
                                 )}
+                                <Box sx={{
+                                  width: 6,
+                                  height: 6,
+                                  borderRadius: '50%',
+                                  bgcolor: 'success.main',
+                                  animation: 'pulse 2s infinite',
+                                  '@keyframes pulse': {
+                                    '0%': { opacity: 1 },
+                                    '50%': { opacity: 0.5 },
+                                    '100%': { opacity: 1 }
+                                  }
+                                }} />
                               </Box>
                             ) : '-'}
                           </TableCell>
@@ -1441,32 +1679,59 @@ function App() {
             {currentNotification && (
               <Alert
                 onClose={handleNotificationClose}
-                severity="info"
+                severity={currentNotification.type === 'message' ? 'info' : 'success'}
                 sx={{ 
                   width: '100%',
-                  cursor: 'pointer',
+                  cursor: currentNotification.type === 'message' ? 'pointer' : 'default',
                   '&:hover': {
-                    bgcolor: 'info.light'
+                    bgcolor: currentNotification.type === 'message' ? 'info.light' : 'success.light'
                   }
                 }}
                 onClick={() => handleNotificationClick(currentNotification)}
               >
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Avatar 
-                    src={currentNotification.user.photo_url} 
-                    sx={{ width: 24, height: 24 }}
-                  >
-                    {currentNotification.user.full_name ? currentNotification.user.full_name[0] : 'U'}
-                  </Avatar>
-                  <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                      {currentNotification.user.full_name || currentNotification.user.username || 'User'}
-                    </Typography>
-                    <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                      {currentNotification.message}
-                    </Typography>
+                {currentNotification.type === 'message' ? (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Avatar 
+                      src={currentNotification.user.photo_url} 
+                      sx={{ width: 24, height: 24 }}
+                    >
+                      {currentNotification.user.full_name ? currentNotification.user.full_name[0] : 'U'}
+                    </Avatar>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                        {currentNotification.user.full_name || currentNotification.user.username || 'User'}
+                      </Typography>
+                      <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                        {currentNotification.message}
+                      </Typography>
+                    </Box>
                   </Box>
-                </Box>
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: '50%',
+                      bgcolor: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '0.75rem'
+                    }}>
+                      ✓
+                    </Box>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                        {currentNotification.message}
+                      </Typography>
+                      {currentNotification.details && (
+                        <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                          {currentNotification.details}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                )}
               </Alert>
             )}
           </Snackbar>
