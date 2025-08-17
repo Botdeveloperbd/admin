@@ -30,12 +30,45 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
   const [audioProgress, setAudioProgress] = useState({});
   const [audioDuration, setAudioDuration] = useState({});
   const [videoPlaying, setVideoPlaying] = useState({});
+  const [isTyping, setIsTyping] = useState(false);
+  const [typingTimeout, setTypingTimeout] = useState(null);
 
   useEffect(() => {
     if (!minimized && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, minimized]);
+
+  // Handle typing indicator
+  const handleTyping = (value) => {
+    setChatInput(value);
+    
+    // Show typing indicator
+    if (!isTyping) {
+      setIsTyping(true);
+    }
+    
+    // Clear existing timeout
+    if (typingTimeout) {
+      clearTimeout(typingTimeout);
+    }
+    
+    // Hide typing indicator after 2 seconds of no typing
+    const timeout = setTimeout(() => {
+      setIsTyping(false);
+    }, 2000);
+    
+    setTypingTimeout(timeout);
+  };
+
+  // Cleanup typing timeout
+  useEffect(() => {
+    return () => {
+      if (typingTimeout) {
+        clearTimeout(typingTimeout);
+      }
+    };
+  }, [typingTimeout]);
 
   const handleSend = async () => {
     if (!chatInput.trim() && files.length === 0) return;
@@ -209,14 +242,26 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
           cursor: 'pointer',
           zIndex: 9999,
           boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
-          '&:hover': { bgcolor: '#0056b3' }
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          '&:hover': { 
+            bgcolor: '#0056b3',
+            transform: 'translateY(-2px)',
+            boxShadow: '0 6px 28px rgba(0,0,0,0.25)'
+          }
         }}
         onClick={onMinimize}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Avatar 
             src={user.photo_url} 
-            sx={{ width: 32, height: 32, bgcolor: '#fff', color: '#007bff' }}
+            sx={{ 
+              width: 32, 
+              height: 32, 
+              bgcolor: '#fff', 
+              color: '#007bff',
+              transition: 'transform 0.2s ease',
+              '&:hover': { transform: 'scale(1.1)' }
+            }}
           >
             {user.full_name ? user.full_name[0] : 'U'}
           </Avatar>
@@ -224,7 +269,18 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
             {user.full_name || user.username || 'User'}
           </Typography>
         </Box>
-        <IconButton size="small" onClick={(e) => { e.stopPropagation(); onClose(); }} sx={{ color: 'white' }}>
+        <IconButton 
+          size="small" 
+          onClick={(e) => { e.stopPropagation(); onClose(); }} 
+          sx={{ 
+            color: 'white',
+            '&:hover': { 
+              bgcolor: 'rgba(255,255,255,0.1)',
+              transform: 'scale(1.1)'
+            },
+            transition: 'all 0.2s ease'
+          }}
+        >
           <CloseIcon />
         </IconButton>
       </Box>
@@ -249,24 +305,53 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
         zIndex: 9999,
         bgcolor: '#fff',
         boxShadow: '0 8px 32px rgba(0,0,0,0.24)',
-        border: '1px solid #e0e0e0'
+        border: '1px solid #e0e0e0',
+        animation: 'slideInUp 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        '@keyframes slideInUp': {
+          '0%': {
+            opacity: 0,
+            transform: 'translateY(20px) scale(0.95)',
+          },
+          '100%': {
+            opacity: 1,
+            transform: 'translateY(0) scale(1)',
+          },
+        },
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        '&:hover': {
+          boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+          transform: 'translateY(-2px)'
+        }
       }}
     >
       <Box 
         sx={{ 
           bgcolor: '#007bff',
+          background: 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
           color: 'white',
           p: 2,
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'space-between', 
-          borderRadius: '16px 16px 0 0'
+          borderRadius: '16px 16px 0 0',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Avatar 
             src={user.photo_url} 
-            sx={{ width: 40, height: 40, bgcolor: '#fff', color: '#007bff' }}
+            sx={{ 
+              width: 40, 
+              height: 40, 
+              bgcolor: '#fff', 
+              color: '#007bff',
+              border: '2px solid rgba(255,255,255,0.3)',
+              transition: 'all 0.2s ease',
+              '&:hover': { 
+                transform: 'scale(1.1)',
+                border: '2px solid rgba(255,255,255,0.6)'
+              }
+            }}
           >
             {user.full_name ? user.full_name[0] : 'U'}
           </Avatar>
@@ -274,19 +359,53 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
             <Typography variant="subtitle1" sx={{ fontWeight: 600, fontSize: '1rem' }}>
               {user.full_name || user.username || 'User'}
             </Typography>
-            <Typography variant="caption" sx={{ opacity: 0.8 }}>
+            <Typography variant="caption" sx={{ opacity: 0.8, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Box sx={{ 
+                width: 6, 
+                height: 6, 
+                borderRadius: '50%', 
+                bgcolor: user.is_online ? '#4caf50' : '#999',
+                animation: user.is_online ? 'pulse 2s infinite' : 'none',
+                '@keyframes pulse': {
+                  '0%': { opacity: 1 },
+                  '50%': { opacity: 0.5 },
+                  '100%': { opacity: 1 }
+                }
+              }} />
               {user.is_online ? 'Online' : 'Offline'}
             </Typography>
           </Box>
         </Box>
         <Box sx={{ display: 'flex', gap: 0.5 }}>
           <Tooltip title="Minimize">
-            <IconButton size="small" onClick={onMinimize} sx={{ color: 'white' }}>
+            <IconButton 
+              size="small" 
+              onClick={onMinimize} 
+              sx={{ 
+                color: 'white',
+                '&:hover': { 
+                  bgcolor: 'rgba(255,255,255,0.1)',
+                  transform: 'scale(1.1)'
+                },
+                transition: 'all 0.2s ease'
+              }}
+            >
               <MinimizeIcon />
             </IconButton>
           </Tooltip>
           <Tooltip title="Close">
-            <IconButton size="small" onClick={onClose} sx={{ color: 'white' }}>
+            <IconButton 
+              size="small" 
+              onClick={onClose} 
+              sx={{ 
+                color: 'white',
+                '&:hover': { 
+                  bgcolor: 'rgba(255,255,255,0.1)',
+                  transform: 'scale(1.1)'
+                },
+                transition: 'all 0.2s ease'
+              }}
+            >
               <CloseIcon />
             </IconButton>
           </Tooltip>
@@ -361,7 +480,13 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
                     boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
                     fontSize: '0.9rem',
                     wordBreak: 'break-word',
-                    position: 'relative'
+                    position: 'relative',
+                    animation: 'fadeIn 0.3s ease',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      transform: 'translateY(-1px)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                    }
                   }}>
                     {(() => {
                       if (msg.message && (msg.message.startsWith('[image]') || msg.message.startsWith('[gif]'))) {
@@ -819,6 +944,70 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
             </React.Fragment>
           );
         })}
+
+        {/* Typing Indicator */}
+        {isTyping && (
+          <Box sx={{
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'flex-end',
+            mb: 1.5,
+            gap: 1
+          }}>
+            <Avatar 
+              src={user.photo_url} 
+              sx={{ 
+                width: 32, 
+                height: 32, 
+                bgcolor: '#e0e0e0',
+                color: '#666'
+              }}
+            >
+              {user.full_name ? user.full_name[0] : 'U'}
+            </Avatar>
+            <Box sx={{
+              bgcolor: 'white',
+              borderRadius: '18px 18px 18px 4px',
+              px: 2, 
+              py: 1.2,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1
+            }}>
+              <Box sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1
+              }}>
+                <Box sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  bgcolor: '#999',
+                  animation: 'typingBounce 1.4s infinite ease-in-out'
+                }} />
+                <Box sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  bgcolor: '#999',
+                  animation: 'typingBounce 1.4s infinite ease-in-out',
+                  animationDelay: '-0.16s'
+                }} />
+                <Box sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  bgcolor: '#999',
+                  animation: 'typingBounce 1.4s infinite ease-in-out',
+                  animationDelay: '0s'
+                }} />
+              </Box>
+            </Box>
+          </Box>
+        )}
+        
         <div ref={messagesEndRef} />
       </Box>
       
@@ -887,37 +1076,63 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
         </Box>
       )}
       
-      <Box sx={{ 
-        p: 1.5, 
-        borderTop: '1px solid #e0e0e0', 
-        bgcolor: '#fff', 
-        display: 'flex', 
-        gap: 1, 
-        alignItems: 'center' 
-      }}>
-        <Tooltip title="Attach file">
-          <IconButton component="label" sx={{ color: '#666' }}>
-            <AttachFileIcon />
-            <input
-              type="file"
-              accept="image/*,video/*,audio/*"
-              multiple
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              style={{ display: 'none' }}
-            />
-          </IconButton>
-        </Tooltip>
+      <Box
+        sx={{
+          p: 2,
+          bgcolor: '#fff',
+          borderTop: '1px solid #e0e0e0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          position: 'relative'
+        }}
+      >
+        <Box sx={{ position: 'relative' }}>
+          <Tooltip title="Attach file">
+            <IconButton
+              size="small"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              sx={{ 
+                color: '#666',
+                '&:hover': { 
+                  bgcolor: '#f0f2f5',
+                  transform: 'scale(1.1)',
+                  color: '#007bff'
+                },
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <AttachFileIcon />
+            </IconButton>
+          </Tooltip>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+            accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
+          />
+        </Box>
         
         <Box sx={{ position: 'relative' }}>
-          <Tooltip title={recording ? "Recording..." : "Hold to record voice"}>
+          <Tooltip title="Voice message">
             <IconButton
               color={recording ? 'error' : 'default'}
               onMouseDown={startRecording}
               onMouseUp={stopRecording}
               onMouseLeave={stopRecording}
               disabled={recording || isUploading}
-              sx={{ color: recording ? '#f44336' : '#666' }}
+              sx={{ 
+                color: recording ? '#f44336' : '#666',
+                '&:hover': { 
+                  bgcolor: '#f0f2f5',
+                  transform: 'scale(1.1)',
+                  color: recording ? '#f44336' : '#007bff'
+                },
+                transition: 'all 0.2s ease'
+              }}
             >
               <MicIcon />
             </IconButton>
@@ -934,7 +1149,13 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
               px: 1,
               py: 0.5,
               borderRadius: 1,
-              fontSize: '0.75rem'
+              fontSize: '0.75rem',
+              animation: 'pulse 1s infinite',
+              '@keyframes pulse': {
+                '0%': { opacity: 1 },
+                '50%': { opacity: 0.7 },
+                '100%': { opacity: 1 }
+              }
             }}>
               <span style={{ marginRight: 4 }}>●</span>
               Recording {recordTimer}s
@@ -947,13 +1168,27 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
           fullWidth
           placeholder="Type a message..."
           value={chatInput}
-          onChange={e => setChatInput(e.target.value)}
+          onChange={e => handleTyping(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && (chatInput.trim() || files.length > 0)) { handleSend(); } }}
           sx={{ 
             flex: 1,
             '& .MuiOutlinedInput-root': {
               borderRadius: 3,
-              bgcolor: '#f8f9fa'
+              bgcolor: '#f8f9fa',
+              border: '1px solid #e0e0e0',
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                borderColor: '#007bff',
+                bgcolor: '#fff'
+              },
+              '&.Mui-focused': {
+                borderColor: '#007bff',
+                bgcolor: '#fff',
+                boxShadow: '0 0 0 2px rgba(0,123,255,0.2)'
+              }
+            },
+            '& .MuiOutlinedInput-input': {
+              fontSize: '0.9rem'
             }
           }}
           disabled={recording || isUploading}
@@ -968,8 +1203,11 @@ export default function ChatWindow({ user, open, minimized, onClose, onMinimize,
               sx={{ 
                 bgcolor: '#007bff',
                 color: 'white',
+                transition: 'all 0.2s ease',
                 '&:hover': {
-                  bgcolor: '#0056b3'
+                  bgcolor: '#0056b3',
+                  transform: 'scale(1.1)',
+                  boxShadow: '0 4px 12px rgba(0,123,255,0.3)'
                 },
                 '&:disabled': {
                   bgcolor: '#e0e0e0',
